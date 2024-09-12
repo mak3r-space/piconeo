@@ -1,7 +1,8 @@
+# Copied from MIT-licensed blaz-r/pi_pico_neopixel repo:
+# https://github.com/blaz-r/pi_pico_neopixel/blob/main/neopixel.py
 import array, time
 from machine import Pin
 import rp2
-
 
 # PIO state machine for RGB. Pulls 24 bits (rgb -> 3 * 8bit) automatically
 @rp2.asm_pio(sideset_init=rp2.PIO.OUT_LOW, out_shiftdir=rp2.PIO.SHIFT_LEFT, autopull=True, pull_thresh=24)
