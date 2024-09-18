@@ -4,6 +4,7 @@ package main
 
 import (
     "image/color"
+    "machine"
     "math"
     "time"
 )
@@ -20,6 +21,7 @@ const numPixels = 20
 func main() {
     idx := 0
     inc := 1
+    buttonTest()
     for true {
         if err := writeColors(idx, colorWriter); err != nil {
             println("ERROR: " + err.Error())
@@ -31,6 +33,37 @@ func main() {
             inc = -inc
         }
     }
+}
+
+func buttonTest() {
+    led := machine.LED
+    led.Configure(machine.PinConfig{Mode: machine.PinOutput})
+    btn := machine.GP19
+    config := machine.PinConfig{Mode: machine.PinInputPullup}
+    btn.Configure(config)
+    //start := time.Now()
+    btn.SetInterrupt(machine.PinFalling|machine.PinRising, func(pin machine.Pin) {
+        // if !pin.Get() {
+        //     start = time.Now()
+        //     return
+        // }
+        // dur := time.Since(start)
+        // long := false
+        // if dur > time.Millisecond*500 {
+        //     long = true
+        // }
+        // led.Set(true)
+        // time.Sleep(time.Millisecond * 200)
+        // if long {
+        //     led.Set(false)
+        //     time.Sleep(time.Millisecond * 200)
+        //     led.Set(true)
+        //     time.Sleep(time.Millisecond * 200)
+        // }
+        on := !pin.Get()
+        led.Set(on)
+    })
+
 }
 
 // hsl converts and HSL color to a color.RGBA.

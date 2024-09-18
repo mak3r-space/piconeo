@@ -15,8 +15,10 @@ type ledStrip struct {
 }
 
 func newLedStrip() *ledStrip {
-    strip := &ledStrip{Device: ws2812.NewWS2812(machine.GP28)}
-    strip.Pin.Configure(machine.PinConfig{Mode: machine.PinOutput})
+    device := ws2812.NewWS2812(machine.GP28)
+    strip := &ledStrip{Device: device}
+    pinConfig := machine.PinConfig{Mode: machine.PinOutput}
+    strip.Pin.Configure(pinConfig)
     return strip
 }
 
