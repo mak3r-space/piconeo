@@ -28,7 +28,7 @@ func main() {
     for longPress := range pressCh {
         if longPress {
             writeColors(green, colorWriter) // long press
-            mode = (mode + 1) % 3           // pattern, color, birghtness
+            mode = (mode + 1) % 3           // pattern, color, brightness
         } else { // short press
             level[mode] = (level[mode] + 1) % 4
             updateLEDConfig(mode, level[mode])

@@ -27,18 +27,6 @@ func (t terminal) WriteColors(colors []color.RGBA) error {
     return nil
 }
 
-func (terminal) getLightness(distCenter int) float64 {
-    switch distCenter {
-    case 0:
-        return 0.5
-    case 1:
-        return 0.35
-    case 2:
-        return 0.2
-    case 3:
-        return 0.1
-    case 4:
-        return 0.05
-    }
-    return 0
+func (terminal) adjustLightness(l int32) int32 {
+    return l
 }

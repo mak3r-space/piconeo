@@ -3,6 +3,7 @@
 package main
 
 import (
+    "fmt"
     "machine"
 
     "tinygo.org/x/drivers/ws2812"
@@ -22,18 +23,39 @@ func newLedStrip() *ledStrip {
     return strip
 }
 
-func (*ledStrip) getLightness(distCenter int) float64 {
-    switch distCenter {
-    case 0:
-        return 0.5
-    case 1:
-        return 0.25
-    case 2:
-        return 0.1
-    case 3:
-        return 0.01
-    case 4:
-        return 0.0025
+func (ls *ledStrip) adjustLightness(l int32) int32 {
+    switch {
+    case l == 0:
+        return 0
+    case l < 10:
+        return 1
+    case l < 20:
+        return 2
+    case l < 50:
+        return 3
+    case l < 65:
+        return 4
+    case l < 75:
+        return 5
+    case l < 80:
+        return 6
+    case l < 85:
+        return 7
+    case l < 90:
+        return 8
+    case l < 95:
+        return 9
+    case l < 100:
+        return 10
+    case l < 200: // 100..200 -> 10 .. 100
+        return l*10/9 - 80
+    case l < 350: // 200..350  -> 100 ..250
+        return l - 100
+    case l <= 500: // 350...500 -> 250..500
+        return 250 + (l - 350)
+    case l <= 1000: // mirror behavior for 500..1000
+        return 1000 - ls.adjustLightness(1000-l)
+    default:
+        panic(fmt.Sprintf("invalid lightness %d, should be 0-1000", l))
     }
-    return 0
 }
