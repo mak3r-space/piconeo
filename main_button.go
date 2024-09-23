@@ -28,13 +28,13 @@ const (
     modeLen
 )
 
-var modeLevels map[mode]int
-var modeMaxLevels = map[mode]int{
+var levels = make(map[mode]int, modeLen)
+var maxLevels = map[mode]int{
     colorMode: 2,
     speedMode: 2,
 }
 var currentMode mode = colorMode
-var minTick time.Duration = 50 * time.Millisecond
+var minTick time.Duration = 75 * time.Millisecond
 
 type ledConfig struct {
     mode  mode
@@ -44,51 +44,48 @@ type ledConfig struct {
 
 func main() {
     writeColors(0, 0)
-    pressCh := make(chan bool, 32)
-    go startButtonListener(pressCh, machine.GP19)
+    btnCh1 := make(chan bool, 32)
+    go startButtonListener(btnCh1, machine.GP16)
+    btnCh2 := make(chan bool, 32)
+    go startButtonListener(btnCh2, machine.GP26)
 
-    var hue int32 = 0
-    hueCh := make(chan int32, 32)
-    tickCh := make(chan time.Duration, 32)
-    go startLEDs(hueCh, tickCh, machine.GP28)
+    // var hue int32 = 0
+    // var pace time.Duration = 1
+    // hueCh := make(chan int32, 32)
+    // tickCh := make(chan time.Duration, 32)
+    configCh := make(chan ledConfig, 32)
+    go startLEDs(configCh, machine.GP28)
+    //go startLEDs(hueCh, tickCh, machine.GP28)
 
-    var pace time.Duration = 1
-    for longPress := range pressCh {
-        if longPress {
-            pace = (pace + 1) % 5
-            tickCh <- minTick * (pace + 1)
-        } else {
-            hue = (hue + 600) % 3600
-            hueCh <- hue
+    for {
+        select {
+        case <-btnCh1:
+            levels[speedMode] = (levels[speedMode] + 1) % maxLevels[speedMode]
+            configCh <- ledConfig{mode: speedMode, level: levels[speedMode]}
+        case <-btnCh2:
+            levels[colorMode] = (levels[colorMode] + 1) % maxLevels[colorMode]
+            configCh <- ledConfig{mode: colorMode, level: levels[colorMode]}
         }
-        // time.Sleep(200 * time.Millisecond)
-        // colorsOff()
-        // intro := false
-        // if longPress {
-        //     currentMode = (currentMode + 1) % modeLen // color, speed,...
-        //     intro = true
-        // } else { // short press
-        //     modeLevels[currentMode] = (modeLevels[currentMode] + 1) % modeMaxLevels[currentMode]
-        // }
-        // ledConfigCh <- ledConfig{
-        //     mode:  currentMode,
-        //     level: modeLevels[currentMode],
-        //     intro: intro,
-        // }
     }
-    select {}
 }
 
-func startLEDs(hueCh chan int32, tickCh chan time.Duration, _ machine.Pin) {
+func startLEDs(configCh chan ledConfig, _ machine.Pin) {
+    //func startLEDs(hueCh chan int32, tickCh chan time.Duration, _ machine.Pin) {
     var hue int32 = 1800
     tick := minTick
     idx := 0
     inc := 1
-    //colorMultiplier := int32(3600 / modeMaxLevels[colorMode])
+    //colorMultiplier := int32(3600 / maxLevels[colorMode])
     for {
         select {
-        case hue = <-hueCh:
-        case tick = <-tickCh:
+        // case hue = <-hueCh:
+        // case tick = <-tickCh:
+        case config := <-configCh:
+            if config.mode == colorMode {
+                hue = int32(600 * config.level)
+            } else if config.mode == speedMode {
+                tick = minTick * time.Duration(config.level+1)
+            }
         case <-time.After(tick):
             writeColors(hue, idx)
             idx += inc
