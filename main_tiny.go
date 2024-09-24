@@ -16,7 +16,7 @@ type ledStrip struct {
 }
 
 func newLedStrip() *ledStrip {
-    device := ws2812.NewWS2812(machine.GP0)
+    device := ws2812.NewWS2812(machine.GP28)
     strip := &ledStrip{Device: device}
     pinConfig := machine.PinConfig{Mode: machine.PinOutput}
     strip.Pin.Configure(pinConfig)
@@ -24,23 +24,18 @@ func newLedStrip() *ledStrip {
 }
 
 func (ls *ledStrip) adjustLightness(l int) int {
-    return l
-}
-func (ls *ledStrip) adjustLightness2(l int) int {
     switch {
     case l == 0:
         return 0
     case l < 10:
-        return 1
-    case l < 20:
         return 2
-    case l < 50:
+    case l < 20:
         return 3
-    case l < 65:
+    case l < 50:
         return 4
-    case l < 75:
+    case l < 65:
         return 5
-    case l < 80:
+    case l < 75:
         return 6
     case l < 85:
         return 7
