@@ -8,7 +8,7 @@ import (
 
 type ColorWriter interface {
     WriteColors([]color.RGBA) error
-    getLightness(int) float64
+    adjustLightness(int32) int32
 }
 
 const (
@@ -21,73 +21,75 @@ const (
 type mode int
 
 const (
-    colorMode mode = iota
+    paletteMode mode = iota
     speedMode
     // patternMode
-    // lightnessMode
+    lightnessMode
     modeLen
 )
 
 var levels = make(map[mode]int, modeLen)
-var maxLevels = map[mode]int{
-    colorMode: 2,
-    speedMode: 2,
+var lightnessLevels = [][]int32{
+    {500, 350, 200, 100, 50},
+    {200, 140, 80, 40, 20},
+    {100, 70, 40, 25, 10},
+    {70, 40, 25, 10, 5},
 }
-var currentMode mode = colorMode
+var palettes = [][]int32{{0, 3600}, {0, 1200}, {1200, 2400}, {2400, 3600}}
+var levelCnt = map[mode]int{
+    paletteMode:   len(palettes),
+    lightnessMode: len(lightnessLevels),
+    speedMode:     4,
+}
+var cur mode = paletteMode
 var minTick time.Duration = 75 * time.Millisecond
 
 type ledConfig struct {
-    mode  mode
-    level int
-    intro bool
+    mode      mode
+    level     int
+    modeIntro bool
 }
 
 func main() {
-    writeColors(0, 0)
-    btnCh1 := make(chan bool, 32)
-    go startButtonListener(btnCh1, machine.GP16)
-    btnCh2 := make(chan bool, 32)
-    go startButtonListener(btnCh2, machine.GP26)
-
-    // var hue int32 = 0
-    // var pace time.Duration = 1
-    // hueCh := make(chan int32, 32)
-    // tickCh := make(chan time.Duration, 32)
+    writeColors(0, 0, 0, 0)
+    modeCh := make(chan bool, 32)
+    go startButtonListener(modeCh, machine.GP16)
+    levelCh := make(chan bool, 32)
+    go startButtonListener(levelCh, machine.GP26)
     configCh := make(chan ledConfig, 32)
     go startLEDs(configCh, machine.GP28)
-    //go startLEDs(hueCh, tickCh, machine.GP28)
 
     for {
         select {
-        case <-btnCh1:
-            levels[speedMode] = (levels[speedMode] + 1) % maxLevels[speedMode]
-            configCh <- ledConfig{mode: speedMode, level: levels[speedMode]}
-        case <-btnCh2:
-            levels[colorMode] = (levels[colorMode] + 1) % maxLevels[colorMode]
-            configCh <- ledConfig{mode: colorMode, level: levels[colorMode]}
+        case <-modeCh:
+            cur = (cur + 1) % modeLen
+        case <-levelCh:
+            levels[cur] = (levels[cur] + 1) % levelCnt[cur]
+            configCh <- ledConfig{mode: cur, level: levels[cur]}
         }
     }
 }
 
 func startLEDs(configCh chan ledConfig, _ machine.Pin) {
-    //func startLEDs(hueCh chan int32, tickCh chan time.Duration, _ machine.Pin) {
-    var hue int32 = 1800
+    var paletteStart, paletteEnd int32
+    lightness := 0
     tick := minTick
     idx := 0
     inc := 1
-    //colorMultiplier := int32(3600 / maxLevels[colorMode])
     for {
         select {
-        // case hue = <-hueCh:
-        // case tick = <-tickCh:
         case config := <-configCh:
-            if config.mode == colorMode {
-                hue = int32(600 * config.level)
-            } else if config.mode == speedMode {
-                tick = minTick * time.Duration(config.level+1)
+            switch config.mode {
+            case paletteMode:
+                paletteStart = palettes[config.level][0]
+                paletteEnd = palettes[config.level][1]
+            case speedMode:
+                tick = minTick * time.Duration(1<<config.level)
+            case lightnessMode:
+                lightness = config.level
             }
         case <-time.After(tick):
-            writeColors(hue, idx)
+            writeColors(paletteStart, paletteEnd, lightness, idx)
             idx += inc
             if idx == 0 || idx == numPixels-1 {
                 inc = -inc
@@ -98,14 +100,15 @@ func startLEDs(configCh chan ledConfig, _ machine.Pin) {
 
 var colors = make([]color.RGBA, numPixels)
 
-func writeColors(hue int32, idx int) error {
+func writeColors(paletteStart int32, paletteEnd int32, lightness int, idx int) error {
     for i := range colors {
         dist := i - idx
         if dist < 0 {
             dist = -dist
         }
-        l := getLightness(dist)
+        l := getLightness(dist, lightness)
         l = colorWriter.adjustLightness(l)
+        hue := getHue(paletteStart, paletteEnd, int32(i))
         colors[i] = hsl(hue, 1000, l)
     }
     return colorWriter.WriteColors(colors)
@@ -119,8 +122,12 @@ func colorsOff() error {
 
 }
 
-func getLightness(dist int) int32 {
-    lightness := []int32{500, 350, 200, 100, 50}
+func getHue(paletteStart int32, paletteEnd int32, idx int32) int32 {
+    return paletteStart + (paletteEnd-paletteStart)*idx/numPixels
+}
+
+func getLightness(dist int, level int) int32 {
+    lightness := lightnessLevels[level]
     if dist < len(lightness) {
         return lightness[dist]
     }
