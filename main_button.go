@@ -21,7 +21,7 @@ const (
 type mode int
 
 const (
-    paletteMode mode = iota
+    colorMode mode = iota
     speedMode
     // patternMode
     lightnessMode
@@ -37,12 +37,13 @@ var lightnessLevels = [][]int32{
 }
 var palettes = [][]int32{{0, 3600}, {0, 1200}, {1200, 2400}, {2400, 3600}}
 var levelCnt = map[mode]int{
-    paletteMode:   len(palettes),
+    colorMode:     len(palettes),
     lightnessMode: len(lightnessLevels),
     speedMode:     4,
 }
-var cur mode = paletteMode
-var minTick time.Duration = 75 * time.Millisecond
+var cur mode = colorMode
+var tick time.Duration = 15 * time.Millisecond
+var minTicksBetween = 5 // number of ticks between color updates
 
 type ledConfig struct {
     mode      mode
@@ -51,7 +52,6 @@ type ledConfig struct {
 }
 
 func main() {
-    writeColors(0, 0, 0, 0)
     modeCh := make(chan bool, 32)
     go startButtonListener(modeCh, machine.GP16)
     levelCh := make(chan bool, 32)
@@ -70,49 +70,93 @@ func main() {
     }
 }
 
+type hslColor struct{ H, S, L int32 }
+
+var colors1 = make([]hslColor, numPixels)
+var colors2 = make([]hslColor, numPixels)
+var colors = make([]color.RGBA, numPixels)
+
 func startLEDs(configCh chan ledConfig, _ machine.Pin) {
     var paletteStart, paletteEnd int32
     lightness := 0
-    tick := minTick
     idx := 0
     inc := 1
+    ticker := time.NewTicker(tick)
+    ticksBetween := minTicksBetween
+    progress := 0 // progress through the current color transition
     for {
         select {
         case config := <-configCh:
             switch config.mode {
-            case paletteMode:
+            case colorMode:
                 paletteStart = palettes[config.level][0]
                 paletteEnd = palettes[config.level][1]
             case speedMode:
-                tick = minTick * time.Duration(1<<config.level)
+                ticksBetween = minTicksBetween << config.level
             case lightnessMode:
                 lightness = config.level
             }
-        case <-time.After(tick):
-            writeColors(paletteStart, paletteEnd, lightness, idx)
-            idx += inc
-            if idx == 0 || idx == numPixels-1 {
-                inc = -inc
+        case <-ticker.C:
+            if progress >= ticksBetween {
+                progress = 0
+                idx, inc = nextIndex(idx, inc)
+                updateColors(colors1, colors2, idx, inc, paletteStart, paletteEnd, lightness)
+            } else {
+                progress += 1
             }
+            writeColors(colors1, colors2, int32(progress), int32(ticksBetween))
         }
     }
 }
 
-var colors = make([]color.RGBA, numPixels)
+func writeColors(colors1, colors2 []hslColor, progress, ticksBetween int32) {
+    for i := range numPixels {
+        c1 := colors1[i]
+        c2 := colors2[i]
+        h := c1.H + (c2.H-c1.H)*progress/ticksBetween
+        l := c1.L + (c2.L-c1.L)*progress/ticksBetween
+        s := c1.S + (c2.S-c1.S)*progress/ticksBetween
+        colors[i] = hsl(h, s, l)
+    }
+    colorWriter.WriteColors(colors)
+}
 
-func writeColors(paletteStart int32, paletteEnd int32, lightness int, idx int) error {
-    for i := range colors {
+func updateColors(colors1, colors2 []hslColor, idx int, inc int, paletteStart, paletteEnd int32, lightness int) {
+    for i := range numPixels {
+        colors1[i] = colors2[i]
         dist := i - idx
         if dist < 0 {
             dist = -dist
         }
         l := getLightness(dist, lightness)
-        l = colorWriter.adjustLightness(l)
-        hue := getHue(paletteStart, paletteEnd, int32(i))
-        colors[i] = hsl(hue, 1000, l)
+        colors2[i].H = getHue(paletteStart, paletteEnd, int32(i))
+        colors2[i].S = 1000
+        colors2[i].L = colorWriter.adjustLightness(l)
+
     }
-    return colorWriter.WriteColors(colors)
 }
+
+func nextIndex(idx int, inc int) (int, int) {
+    idx += inc
+    if idx == 0 || idx == numPixels-1 {
+        inc = -inc
+    }
+    return idx, inc
+}
+
+// func writeColors(paletteStart int32, paletteEnd int32, lightness int, idx int) error {
+//     for i := range colors1 {
+//         dist := i - idx
+//         if dist < 0 {
+//             dist = -dist
+//         }
+//         l := getLightness(dist, lightness)
+//         l = colorWriter.adjustLightness(l)
+//         hue := getHue(paletteStart, paletteEnd, int32(i))
+//         colors[i] = hsl(hue, 1000, l)
+//     }
+//     return colorWriter.WriteColors(colors)
+// }
 
 func colorsOff() error {
     for i := range colors {
