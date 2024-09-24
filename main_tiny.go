@@ -23,7 +23,10 @@ func newLedStrip() *ledStrip {
     return strip
 }
 
-func (ls *ledStrip) adjustLightness(l int32) int32 {
+func (ls *ledStrip) adjustLightness(l int) int {
+    return l
+}
+func (ls *ledStrip) adjustLightness2(l int) int {
     switch {
     case l == 0:
         return 0

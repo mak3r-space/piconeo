@@ -8,7 +8,7 @@ import (
 
 type ColorWriter interface {
     WriteColors([]color.RGBA) error
-    adjustLightness(int32) int32
+    adjustLightness(int) int
 }
 
 const (
@@ -28,28 +28,40 @@ const (
     modeLen
 )
 
-var levels = make(map[mode]int, modeLen)
-var lightnessLevels = [][]int32{
-    {500, 350, 200, 100, 50},
-    {200, 140, 80, 40, 20},
-    {100, 70, 40, 25, 10},
-    {70, 40, 25, 10, 5},
-}
-var palettes = [][]int32{{0, 3600}, {0, 1200}, {1200, 2400}, {2400, 3600}}
-var levelCnt = map[mode]int{
-    colorMode:     len(palettes),
-    lightnessMode: len(lightnessLevels),
-    speedMode:     4,
-}
-var cur mode = colorMode
-var tick time.Duration = 15 * time.Millisecond
-var minTicksBetween = 5 // number of ticks between color updates
+type palette struct{ start, end int }
 
 type ledConfig struct {
     mode      mode
     level     int
     modeIntro bool
 }
+type hsl struct{ H, S, L int }
+
+var levels = make(map[mode]int, modeLen)
+var lightnessLevels = [][]int{
+    {500, 350, 200, 100, 50},
+    {200, 140, 80, 40, 20},
+    {100, 70, 40, 25, 10},
+    {70, 40, 25, 10, 5},
+}
+var palettes = []palette{
+    {start: 0, end: 3600},   // rainbow
+    {start: 3000, end: 300}, // magenta to orange
+    {start: 900, end: 2400}, // green to blue
+    {start: 0, end: 0},      // all red
+}
+var ticksBetween = []int{4, 10, 30, 100} // number of ticks between pattern change
+var levelCnt = map[mode]int{
+    colorMode:     len(palettes),
+    lightnessMode: len(lightnessLevels),
+    speedMode:     len(ticksBetween),
+}
+var cur mode = colorMode
+var tick time.Duration = 10 * time.Millisecond
+
+var colors1 = make([]hsl, numPixels)
+var colors2 = make([]hsl, numPixels)
+var colors = make([]color.RGBA, numPixels)
 
 func main() {
     modeCh := make(chan bool, 32)
@@ -70,66 +82,65 @@ func main() {
     }
 }
 
-type hslColor struct{ H, S, L int32 }
-
-var colors1 = make([]hslColor, numPixels)
-var colors2 = make([]hslColor, numPixels)
-var colors = make([]color.RGBA, numPixels)
-
 func startLEDs(configCh chan ledConfig, _ machine.Pin) {
-    var paletteStart, paletteEnd int32
-    lightness := 0
+    palette := palettes[0]
+    lightness := lightnessLevels[0]
     idx := 0
     inc := 1
     ticker := time.NewTicker(tick)
-    ticksBetween := minTicksBetween
-    progress := 0 // progress through the current color transition
+    maxTicks := ticksBetween[0]
+    ticks := 0 // progress through the current color transition, minor ticks
     for {
         select {
         case config := <-configCh:
             switch config.mode {
             case colorMode:
-                paletteStart = palettes[config.level][0]
-                paletteEnd = palettes[config.level][1]
+                palette = palettes[config.level]
             case speedMode:
-                ticksBetween = minTicksBetween << config.level
+                maxTicks = ticksBetween[config.level]
             case lightnessMode:
-                lightness = config.level
+                lightness = lightnessLevels[config.level]
             }
         case <-ticker.C:
-            if progress >= ticksBetween {
-                progress = 0
+            ticks = nextMinorTick(ticks, maxTicks)
+            if ticks == 0 {
+                // next major tick, next colors
                 idx, inc = nextIndex(idx, inc)
-                updateColors(colors1, colors2, idx, inc, paletteStart, paletteEnd, lightness)
-            } else {
-                progress += 1
+                copy(colors1, colors2)
+                updateColors(colors2, idx, inc, palette, lightness)
             }
-            writeColors(colors1, colors2, int32(progress), int32(ticksBetween))
+            writeColors(colors1, colors2, int(ticks), int(maxTicks))
         }
     }
 }
 
-func writeColors(colors1, colors2 []hslColor, progress, ticksBetween int32) {
+func nextMinorTick(ticks, maxTicks int) int {
+    if ticks >= maxTicks {
+        return 0
+    }
+    return ticks + 1
+}
+
+func writeColors(colors1, colors2 []hsl, ticks, maxTicks int) {
     for i := range numPixels {
         c1 := colors1[i]
         c2 := colors2[i]
-        h := c1.H + (c2.H-c1.H)*progress/ticksBetween
-        l := c1.L + (c2.L-c1.L)*progress/ticksBetween
-        s := c1.S + (c2.S-c1.S)*progress/ticksBetween
-        colors[i] = hsl(h, s, l)
+        h := c1.H + (c2.H-c1.H)*ticks/maxTicks
+        l := c1.L + (c2.L-c1.L)*ticks/maxTicks
+        s := c1.S + (c2.S-c1.S)*ticks/maxTicks
+        colors[i] = hsl2rgb(h, s, l)
     }
     colorWriter.WriteColors(colors)
 }
 
-func updateColors(colors1, colors2 []hslColor, idx int, inc int, paletteStart, paletteEnd int32, lightness int) {
+func updateColors(colors2 []hsl, idx int, inc int, palette palette, l []int) {
     for i := range numPixels {
-        colors1[i] = colors2[i]
         dist := i - idx
         if dist < 0 {
             dist = -dist
         }
-        l := getLightness(dist, lightness)
-        colors2[i].H = getHue(paletteStart, paletteEnd, int32(i))
+        l := getLightness(dist, l)
+        colors2[i].H = getHue(palette.start, palette.end, int(i))
         colors2[i].S = 1000
         colors2[i].L = colorWriter.adjustLightness(l)
 
@@ -144,20 +155,6 @@ func nextIndex(idx int, inc int) (int, int) {
     return idx, inc
 }
 
-// func writeColors(paletteStart int32, paletteEnd int32, lightness int, idx int) error {
-//     for i := range colors1 {
-//         dist := i - idx
-//         if dist < 0 {
-//             dist = -dist
-//         }
-//         l := getLightness(dist, lightness)
-//         l = colorWriter.adjustLightness(l)
-//         hue := getHue(paletteStart, paletteEnd, int32(i))
-//         colors[i] = hsl(hue, 1000, l)
-//     }
-//     return colorWriter.WriteColors(colors)
-// }
-
 func colorsOff() error {
     for i := range colors {
         colors[i] = color.RGBA{}
@@ -166,12 +163,14 @@ func colorsOff() error {
 
 }
 
-func getHue(paletteStart int32, paletteEnd int32, idx int32) int32 {
-    return paletteStart + (paletteEnd-paletteStart)*idx/numPixels
+func getHue(start, end, idx int) int {
+    if start > end {
+        end = end + 3600
+    }
+    return (start + (end-start)*idx/numPixels) % 3600
 }
 
-func getLightness(dist int, level int) int32 {
-    lightness := lightnessLevels[level]
+func getLightness(dist int, lightness []int) int {
     if dist < len(lightness) {
         return lightness[dist]
     }
@@ -190,15 +189,16 @@ func getLightness(dist int, level int) int32 {
 // floating-point implementations. For a reference implementation using
 // floats, see the [hslFloat64] function below implemented according to
 // https://stackoverflow.com/a/64090995/661500
-func hsl(h, s, l int32) color.RGBA {
+func hsl2rgb(h, s, l int) color.RGBA {
     a := s * min(l, 1000-l) / 1000
-    f := func(n int32) uint8 {
+    f := func(n int) uint8 {
         k := (n*300 + h) % 3600
         v := l - a*max(min(k-900, 2700-k, 300), -300)/300
         return uint8(v * 255 / 1000)
     }
     return color.RGBA{R: f(0), G: f(8), B: f(4)}
 }
+
 func startButtonListener(pressCh chan bool, btn machine.Pin) {
     start := time.Now()
     pressed := false
